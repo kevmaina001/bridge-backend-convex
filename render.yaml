@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: splynx-uisp-bridge
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: UISP_CRM_API_URL
+        sync: false
+      - key: UISP_API_URL
+        sync: false
+      - key: UISP_APP_KEY
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
