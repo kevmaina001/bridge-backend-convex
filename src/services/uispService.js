@@ -124,6 +124,56 @@ async function getUISPClient(clientId) {
 }
 
 /**
+ * Find UISP client by userIdent (custom ID from Splynx)
+ * @param {string} userIdent - The userIdent to search for (e.g., W2123)
+ * @returns {Promise<Object|null>} - Client data or null if not found
+ */
+async function findUISPClientByUserIdent(userIdent) {
+  const uispApiUrl = process.env.UISP_API_URL || 'https://faijonfibre.uisp.com/api/v1.0';
+  const uispAppKey = process.env.UISP_APP_KEY;
+
+  if (!uispAppKey) {
+    throw new Error('UISP_APP_KEY not configured');
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Auth-App-Key': uispAppKey
+  };
+
+  try {
+    logger.info(`Searching for UISP client with userIdent: ${userIdent}`);
+
+    // Fetch all clients and search for matching userIdent
+    // UISP API doesn't support filtering by userIdent directly, so we need to fetch and filter
+    const response = await axios.get(
+      `${uispApiUrl}/clients`,
+      {
+        headers,
+        timeout: 30000,
+        params: {
+          limit: 1000  // Fetch up to 1000 clients
+        }
+      }
+    );
+
+    // Find client with matching userIdent
+    const client = response.data.find(c => c.userIdent === userIdent);
+
+    if (client) {
+      logger.info(`Found UISP client ID ${client.id} for userIdent ${userIdent}`);
+      return client;
+    } else {
+      logger.warn(`No UISP client found with userIdent: ${userIdent}`);
+      return null;
+    }
+  } catch (error) {
+    logger.error(`Error searching for UISP client by userIdent ${userIdent}:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * Get payments from UISP for a specific client
  * @param {number} clientId - UISP client ID
  * @returns {Promise<Array>} - Payment records
@@ -225,6 +275,7 @@ function transformClientData(uispClient) {
 
   return {
     uisp_id: uispClient.id,
+    custom_id: uispClient.userIdent || null,  // Custom ID from UISP
     first_name: uispClient.firstName || contact?.name?.split(' ')[0] || null,
     last_name: uispClient.lastName || contact?.name?.split(' ')[1] || null,
     company_name: uispClient.companyName || null,
@@ -397,5 +448,6 @@ module.exports = {
   fetchUISPClients,
   syncAllClients,
   syncSingleClient,
-  transformClientData
+  transformClientData,
+  findUISPClientByUserIdent
 };

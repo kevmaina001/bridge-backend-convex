@@ -132,6 +132,7 @@ async function syncClientsToConvex(clients) {
       };
 
       // Only add non-null optional fields
+      if (client.custom_id) transformed.custom_id = client.custom_id;
       if (client.first_name) transformed.first_name = client.first_name;
       if (client.last_name) transformed.last_name = client.last_name;
       if (client.email) transformed.email = client.email;

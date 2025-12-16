@@ -68,19 +68,46 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
       });
     }
 
-    // Look up UISP client ID from mapping table
-    const uispClientId = await dbHelpers.getUispClientId(splynxCustomerId);
+    // Look up UISP client ID
+    let uispClientId = null;
+    let lookupMethod = 'unknown';
 
+    // Method 1: For wireless clients (IDs starting with W), search by userIdent in UISP
+    if (splynxCustomerId.toUpperCase().startsWith('W')) {
+      logger.info(`Wireless customer detected: ${splynxCustomerId}. Searching UISP by userIdent...`);
+      try {
+        const uispClient = await findUISPClientByUserIdent(splynxCustomerId);
+        if (uispClient) {
+          uispClientId = uispClient.id;
+          lookupMethod = 'userIdent';
+          logger.info(`Found UISP client ${uispClientId} by userIdent ${splynxCustomerId}`);
+        }
+      } catch (error) {
+        logger.warn(`Failed to search UISP by userIdent: ${error.message}`);
+      }
+    }
+
+    // Method 2: Fall back to mapping table (for non-wireless clients or if userIdent search failed)
     if (!uispClientId) {
-      logger.error(`No UISP client ID mapping found for Splynx customer ${splynxCustomerId}`);
+      logger.info(`Searching mapping table for customer ${splynxCustomerId}...`);
+      uispClientId = await dbHelpers.getUispClientId(splynxCustomerId);
+      if (uispClientId) {
+        lookupMethod = 'mapping_table';
+        logger.info(`Found UISP client ${uispClientId} via mapping table`);
+      }
+    }
+
+    // If still not found, return error
+    if (!uispClientId) {
+      logger.error(`No UISP client found for Splynx customer ${splynxCustomerId}`);
       return res.status(400).json({
-        error: 'Customer mapping not found',
-        message: `Splynx customer ${splynxCustomerId} is not mapped to a UISP client. Please add mapping first.`,
+        error: 'Customer not found',
+        message: `Splynx customer ${splynxCustomerId} not found in UISP. Wireless customers (W...) should have matching userIdent in UISP.`,
         splynxCustomerId: splynxCustomerId
       });
     }
 
-    logger.info(`Mapped Splynx customer ${splynxCustomerId} to UISP client ${uispClientId}`);
+    logger.info(`Using UISP client ${uispClientId} for payment (lookup method: ${lookupMethod})`);
 
     // Use the mapped UISP client ID
     paymentData.client_id = uispClientId;
