@@ -1,10 +1,19 @@
-const axios = require('axios');
+const { ConvexHttpClient } = require('convex/browser');
 const logger = require('../utils/logger');
 
 const CONVEX_URL = process.env.CONVEX_URL;
 
+let convexClient = null;
+
 if (!CONVEX_URL) {
   logger.warn('CONVEX_URL not set in environment variables. Convex integration disabled.');
+} else {
+  try {
+    convexClient = new ConvexHttpClient(CONVEX_URL);
+    logger.info('Convex client initialized successfully');
+  } catch (error) {
+    logger.error('Failed to initialize Convex client:', error.message);
+  }
 }
 
 /**
@@ -93,34 +102,45 @@ async function updatePaymentStatusInConvex(transactionId, status, uispResponse, 
  * @returns {Promise<Object>} Response from Convex
  */
 async function syncClientsToConvex(clients) {
-  if (!CONVEX_URL) {
-    logger.warn('Convex URL not configured. Skipping Convex sync.');
+  if (!convexClient) {
+    logger.warn('Convex client not initialized. Skipping Convex sync.');
     return { success: false, error: 'Convex not configured' };
   }
 
   try {
-    const response = await axios.post(
-      `${CONVEX_URL}/webhooks/clients/bulk`,
-      { clients },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000, // 30 second timeout for bulk operations
-      }
-    );
+    // Transform clients for Convex schema
+    // Note: Convex requires undefined for optional fields, not null
+    const transformedClients = clients.map(client => {
+      const transformed = {
+        uisp_client_id: client.uisp_id?.toString() || client.uisp_client_id,
+        status: client.is_active === false ? 'inactive' : (client.is_suspended ? 'suspended' : 'active'),
+        account_balance: client.account_balance || 0,
+        invoice_balance: client.account_outstanding || 0,
+      };
 
-    logger.info(`${clients.length} clients synced to Convex`);
-    return response.data;
+      // Only add non-null optional fields
+      if (client.first_name) transformed.first_name = client.first_name;
+      if (client.last_name) transformed.last_name = client.last_name;
+      if (client.email) transformed.email = client.email;
+      if (client.phone) transformed.phone = client.phone;
+
+      return transformed;
+    });
+
+    // Call the mutation using string path format
+    // ConvexHttpClient.mutation expects a string path "module:functionName"
+    const result = await convexClient.mutation("clients:bulkUpsertClients", {
+      clients: transformedClients
+    });
+
+    logger.info(`${clients.length} clients synced to Convex successfully`);
+    return { success: true, result };
   } catch (error) {
     logger.error('Error syncing clients to Convex:', error.message);
-    if (error.response) {
-      logger.error('Convex error response:', error.response.data);
-    }
+    logger.error('Error stack:', error.stack);
     return {
       success: false,
-      error: error.message,
-      details: error.response?.data
+      error: error.message
     };
   }
 }
