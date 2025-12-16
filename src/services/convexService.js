@@ -22,34 +22,42 @@ if (!CONVEX_URL) {
  * @returns {Promise<Object>} Response from Convex
  */
 async function sendPaymentToConvex(paymentData) {
-  if (!CONVEX_URL) {
-    logger.warn('Convex URL not configured. Skipping Convex sync.');
+  if (!convexClient) {
+    logger.warn('Convex client not initialized. Skipping Convex sync.');
     return { success: false, error: 'Convex not configured' };
   }
 
   try {
-    const response = await axios.post(
-      `${CONVEX_URL}/webhooks/payment`,
-      paymentData,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000, // 10 second timeout
-      }
-    );
+    // Transform payment data for Convex schema
+    const transformedPayment = {
+      transaction_id: paymentData.transaction_id,
+      client_id: paymentData.client_id?.toString() || '',
+      amount: parseFloat(paymentData.amount),
+      currency_code: paymentData.currency_code || 'KES',
+      created_at: paymentData.created_at,
+      received_at: paymentData.received_at || Date.now(),
+      status: paymentData.status || 'pending',
+      retry_count: paymentData.retry_count || 0,
+    };
 
-    logger.info(`Payment ${paymentData.transaction_id} synced to Convex`);
-    return response.data;
+    // Add optional fields only if they exist
+    if (paymentData.splynx_customer_id) transformedPayment.splynx_customer_id = paymentData.splynx_customer_id;
+    if (paymentData.payment_type) transformedPayment.payment_type = paymentData.payment_type;
+    if (paymentData.payment_method) transformedPayment.payment_method = paymentData.payment_method;
+    if (paymentData.uisp_response) transformedPayment.uisp_response = paymentData.uisp_response;
+    if (paymentData.error_message) transformedPayment.error_message = paymentData.error_message;
+    if (paymentData.last_retry_at) transformedPayment.last_retry_at = paymentData.last_retry_at;
+
+    const result = await convexClient.mutation("payments:insertPayment", transformedPayment);
+
+    logger.info(`Payment ${paymentData.transaction_id} synced to Convex successfully`);
+    return { success: true, result };
   } catch (error) {
     logger.error('Error sending payment to Convex:', error.message);
-    if (error.response) {
-      logger.error('Convex error response:', error.response.data);
-    }
+    logger.error('Error stack:', error.stack);
     return {
       success: false,
-      error: error.message,
-      details: error.response?.data
+      error: error.message
     };
   }
 }
@@ -63,35 +71,40 @@ async function sendPaymentToConvex(paymentData) {
  * @returns {Promise<Object>} Response from Convex
  */
 async function updatePaymentStatusInConvex(transactionId, status, uispResponse, errorMessage) {
-  if (!CONVEX_URL) {
+  if (!convexClient) {
     return { success: false, error: 'Convex not configured' };
   }
 
   try {
-    const response = await axios.post(
-      `${CONVEX_URL}/webhooks/payment/status`,
-      {
-        transaction_id: transactionId,
-        status,
-        uisp_response: uispResponse,
-        error_message: errorMessage,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
-      }
-    );
+    // First, get the payment ID by transaction ID
+    const payment = await convexClient.query("payments:getPaymentByTransactionId", {
+      transactionId: transactionId
+    });
+
+    if (!payment) {
+      logger.warn(`Payment ${transactionId} not found in Convex for status update`);
+      return { success: false, error: 'Payment not found' };
+    }
+
+    // Update the payment status
+    const updateData = {
+      paymentId: payment._id,
+      status
+    };
+
+    if (uispResponse) updateData.uisp_response = uispResponse;
+    if (errorMessage) updateData.error_message = errorMessage;
+
+    const result = await convexClient.mutation("payments:updatePaymentStatus", updateData);
 
     logger.info(`Payment ${transactionId} status updated in Convex: ${status}`);
-    return response.data;
+    return { success: true, result };
   } catch (error) {
     logger.error('Error updating payment status in Convex:', error.message);
+    logger.error('Error stack:', error.stack);
     return {
       success: false,
-      error: error.message,
-      details: error.response?.data
+      error: error.message
     };
   }
 }

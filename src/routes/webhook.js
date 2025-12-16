@@ -150,16 +150,15 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
     });
 
     // Send payment to Convex (non-blocking)
-    // TODO: Fix Convex HTTP routes configuration
-    // sendPaymentToConvex({
-    //   ...paymentRecord,
-    //   splynx_customer_id: paymentData.splynx_customer_id,
-    //   status: 'pending',
-    //   received_at: Date.now(),
-    //   retry_count: 0,
-    // }).catch(err => {
-    //   logger.warn('Failed to send payment to Convex:', err.message);
-    // });
+    sendPaymentToConvex({
+      ...paymentRecord,
+      splynx_customer_id: paymentData.splynx_customer_id,
+      status: 'pending',
+      received_at: Date.now(),
+      retry_count: 0,
+    }).catch(err => {
+      logger.warn('Failed to send payment to Convex:', err.message);
+    });
 
     // Post payment to UISP
     try {
@@ -174,15 +173,14 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
       );
 
       // Update payment status in Convex (non-blocking)
-      // TODO: Fix Convex HTTP routes configuration
-      // updatePaymentStatusInConvex(
-      //   paymentData.transaction_id,
-      //   'success',
-      //   JSON.stringify(uispResponse),
-      //   null
-      // ).catch(err => {
-      //   logger.warn('Failed to update payment status in Convex:', err.message);
-      // });
+      updatePaymentStatusInConvex(
+        paymentData.transaction_id,
+        'success',
+        JSON.stringify(uispResponse),
+        null
+      ).catch(err => {
+        logger.warn('Failed to update payment status in Convex:', err.message);
+      });
 
       // Sync client data from UISP (in background, don't wait)
       syncSingleClient(parseInt(paymentData.client_id))
@@ -219,15 +217,14 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
       );
 
       // Update payment status in Convex (non-blocking)
-      // TODO: Fix Convex HTTP routes configuration
-      // updatePaymentStatusInConvex(
-      //   paymentData.transaction_id,
-      //   'failed',
-      //   null,
-      //   uispError.message
-      // ).catch(err => {
-      //   logger.warn('Failed to update payment status in Convex:', err.message);
-      // });
+      updatePaymentStatusInConvex(
+        paymentData.transaction_id,
+        'failed',
+        null,
+        uispError.message
+      ).catch(err => {
+        logger.warn('Failed to update payment status in Convex:', err.message);
+      });
 
       logger.error('Failed to post payment to UISP', {
         transactionId: paymentData.transaction_id,
