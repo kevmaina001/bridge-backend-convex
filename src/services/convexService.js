@@ -78,7 +78,7 @@ async function updatePaymentStatusInConvex(transactionId, status, uispResponse, 
   try {
     // First, get the payment ID by transaction ID
     const payment = await convexClient.query("payments:getPaymentByTransactionId", {
-      transactionId: transactionId
+      transaction_id: transactionId
     });
 
     if (!payment) {
