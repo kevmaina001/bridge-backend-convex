@@ -51,6 +51,16 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
     const splynxCustomerId = paymentData.customer_id || paymentData.client_id;
 
     if (!splynxCustomerId) {
+      // Check if this is a test/validation request (no customer_id and minimal data)
+      if (!paymentData.amount || Object.keys(paymentData).length < 2) {
+        logger.info('Webhook validation/test request received (no customer_id)');
+        return res.status(200).json({
+          success: true,
+          message: 'Webhook endpoint is active and ready to receive payments',
+          note: 'This was a test request. Real payments must include customer_id or client_id'
+        });
+      }
+
       logger.error('No customer_id or client_id found in webhook payload');
       return res.status(400).json({
         error: 'Missing customer identification',
