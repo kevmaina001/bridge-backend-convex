@@ -4,7 +4,7 @@ const logger = require('../utils/logger');
 const { dbHelpers } = require('../utils/database');
 const { postPaymentToUISP, syncSingleClient, findUISPClientByUserIdent } = require('../services/uispService');
 const { validateWebhookSignature } = require('../middleware/webhookValidator');
-const { sendPaymentToConvex, updatePaymentStatusInConvex } = require('../services/convexService');
+const { sendPaymentToConvex, updatePaymentStatusInConvex, getSplynxCustomerLoginFromConvex } = require('../services/convexService');
 const { getSplynxCustomerLogin } = require('../services/splynxService');
 
 /**
@@ -86,24 +86,47 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
     let lookupMethod = 'unknown';
     let customerLogin = splynxCustomerId; // Default to the ID we received
 
-    // Method 1: Fetch customer login from Splynx API (most reliable)
+    // Method 1: Try to get customer login from Convex (fastest, no external API call)
     try {
-      logger.info(`Fetching customer login from Splynx API for customer ${splynxCustomerId}...`);
-      customerLogin = await getSplynxCustomerLogin(splynxCustomerId);
-      logger.info(`Got customer login from Splynx: ${customerLogin}`);
+      logger.info(`Looking up customer login from Convex for customer ${splynxCustomerId}...`);
+      const loginFromConvex = await getSplynxCustomerLoginFromConvex(splynxCustomerId);
 
-      // Search UISP by userIdent using the customer login
-      const uispClient = await findUISPClientByUserIdent(customerLogin);
-      if (uispClient) {
-        uispClientId = uispClient.id;
-        lookupMethod = 'splynx_api';
-        logger.info(`Found UISP client ${uispClientId} by userIdent ${customerLogin} (via Splynx API)`);
+      if (loginFromConvex) {
+        customerLogin = loginFromConvex;
+        logger.info(`Got customer login from Convex: ${customerLogin}`);
+
+        // Search UISP by userIdent using the customer login
+        const uispClient = await findUISPClientByUserIdent(customerLogin);
+        if (uispClient) {
+          uispClientId = uispClient.id;
+          lookupMethod = 'convex_lookup';
+          logger.info(`Found UISP client ${uispClientId} by userIdent ${customerLogin} (via Convex)`);
+        }
       }
     } catch (error) {
-      logger.warn(`Failed to fetch customer from Splynx API: ${error.message}. Trying fallback methods...`);
+      logger.warn(`Failed to fetch customer from Convex: ${error.message}. Trying Splynx API...`);
     }
 
-    // Method 2: If customer ID starts with W, try direct userIdent search (fallback)
+    // Method 2: If not found in Convex, try Splynx API
+    if (!uispClientId) {
+      try {
+        logger.info(`Fetching customer login from Splynx API for customer ${splynxCustomerId}...`);
+        customerLogin = await getSplynxCustomerLogin(splynxCustomerId);
+        logger.info(`Got customer login from Splynx: ${customerLogin}`);
+
+        // Search UISP by userIdent using the customer login
+        const uispClient = await findUISPClientByUserIdent(customerLogin);
+        if (uispClient) {
+          uispClientId = uispClient.id;
+          lookupMethod = 'splynx_api';
+          logger.info(`Found UISP client ${uispClientId} by userIdent ${customerLogin} (via Splynx API)`);
+        }
+      } catch (error) {
+        logger.warn(`Failed to fetch customer from Splynx API: ${error.message}. Trying fallback methods...`);
+      }
+    }
+
+    // Method 3: If customer ID starts with W, try direct userIdent search (fallback)
     if (!uispClientId && splynxCustomerId.toUpperCase().startsWith('W')) {
       logger.info(`Wireless customer detected: ${splynxCustomerId}. Trying direct userIdent search...`);
       try {
@@ -118,7 +141,7 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
       }
     }
 
-    // Method 3: Fall back to mapping table (last resort)
+    // Method 4: Fall back to mapping table (last resort)
     if (!uispClientId) {
       logger.info(`Searching mapping table for customer ${splynxCustomerId}...`);
       uispClientId = await dbHelpers.getUispClientId(splynxCustomerId);

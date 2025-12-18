@@ -242,10 +242,42 @@ async function logWebhookToConvex(logData) {
   }
 }
 
+/**
+ * Get Splynx customer login from Convex by customer ID
+ * @param {string} splynxCustomerId - Splynx customer ID
+ * @returns {Promise<string|null>} Customer login or null if not found
+ */
+async function getSplynxCustomerLoginFromConvex(splynxCustomerId) {
+  if (!convexClient) {
+    logger.warn('Convex client not initialized. Cannot get customer login.');
+    return null;
+  }
+
+  try {
+    logger.info(`Looking up Splynx customer ${splynxCustomerId} in Convex...`);
+
+    const customer = await convexClient.query("splynx_customers:getSplynxCustomerById", {
+      splynxId: splynxCustomerId.toString()
+    });
+
+    if (customer && customer.login) {
+      logger.info(`Found customer login in Convex: ${customer.login}`);
+      return customer.login;
+    } else {
+      logger.warn(`Splynx customer ${splynxCustomerId} not found in Convex`);
+      return null;
+    }
+  } catch (error) {
+    logger.error('Error getting customer from Convex:', error.message);
+    return null;
+  }
+}
+
 module.exports = {
   sendPaymentToConvex,
   updatePaymentStatusInConvex,
   syncClientsToConvex,
   syncSplynxCustomersToConvex,
   logWebhookToConvex,
+  getSplynxCustomerLoginFromConvex,
 };
