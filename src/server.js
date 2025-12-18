@@ -1,9 +1,20 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-require('dotenv').config();
+const path = require('path');
+
+// Load environment variables from .env file
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const logger = require('./utils/logger');
+
+// Debug: Log that environment variables are loaded
+logger.info('Environment variables loaded', {
+  hasUISPKey: !!process.env.UISP_APP_KEY,
+  hasSplynxKey: !!process.env.SPLYNX_API_KEY,
+  hasSplynxSecret: !!process.env.SPLYNX_API_SECRET,
+  convexUrl: !!process.env.CONVEX_URL
+});
 const webhookRouter = require('./routes/webhook');
 const apiRouter = require('./routes/api');
 

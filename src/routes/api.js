@@ -131,7 +131,14 @@ router.get('/health', (req, res) => {
     success: true,
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    env: {
+      hasUISPKey: !!process.env.UISP_APP_KEY,
+      hasSplynxKey: !!process.env.SPLYNX_API_KEY,
+      hasSplynxSecret: !!process.env.SPLYNX_API_SECRET,
+      splynxUrl: process.env.SPLYNX_API_URL,
+      hasConvexUrl: !!process.env.CONVEX_URL
+    }
   });
 });
 
@@ -376,13 +383,19 @@ router.post('/splynx/customers/sync', async (req, res) => {
     logger.info('Splynx customer sync requested');
 
     // Fetch customers from Splynx
+    logger.info('Calling getAllSplynxCustomers...');
     const splynxCustomers = await getAllSplynxCustomers();
+    logger.info(`Received ${splynxCustomers.length} customers from Splynx`);
 
     // Transform customers
+    logger.info('Transforming customers...');
     const transformedCustomers = splynxCustomers.map(transformSplynxCustomer);
+    logger.info(`Transformed ${transformedCustomers.length} customers`);
 
     // Sync to Convex
+    logger.info('Syncing to Convex...');
     const syncResult = await syncSplynxCustomersToConvex(transformedCustomers);
+    logger.info('Sync to Convex completed', syncResult);
 
     res.json({
       success: true,
@@ -394,11 +407,17 @@ router.post('/splynx/customers/sync', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('Error syncing Splynx customers:', error);
+    logger.error('Error syncing Splynx customers:', {
+      message: error.message,
+      stack: error.stack,
+      response: error.response?.data,
+      status: error.response?.status
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to sync Splynx customers',
-      message: error.message
+      message: error.message,
+      details: error.response?.data || error.stack
     });
   }
 });

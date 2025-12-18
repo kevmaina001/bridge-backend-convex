@@ -1,5 +1,4 @@
 const axios = require('axios');
-const crypto = require('crypto');
 const logger = require('../utils/logger');
 
 const SPLYNX_API_URL = process.env.SPLYNX_API_URL || 'https://faijon.splynx.app';
@@ -11,16 +10,12 @@ if (!SPLYNX_API_KEY || !SPLYNX_API_SECRET) {
 }
 
 /**
- * Generate Splynx API signature
- * @param {string} nonce - Random nonce
- * @returns {string} - HMAC signature
+ * Get Basic Auth header for Splynx API
+ * @returns {string} - Base64 encoded key:secret for Basic auth
  */
-function generateSignature(nonce) {
-  const message = nonce + SPLYNX_API_KEY;
-  return crypto
-    .createHmac('sha256', SPLYNX_API_SECRET)
-    .update(message)
-    .digest('hex');
+function getBasicAuthHeader() {
+  const credentials = `${SPLYNX_API_KEY}:${SPLYNX_API_SECRET}`;
+  return `Basic ${Buffer.from(credentials).toString('base64')}`;
 }
 
 /**
@@ -36,18 +31,11 @@ async function getSplynxCustomer(customerId) {
   try {
     logger.info(`Fetching customer ${customerId} from Splynx API`);
 
-    // Generate nonce and signature for authentication
-    const nonce = Date.now().toString();
-    const signature = generateSignature(nonce);
-
     const response = await axios.get(
-      `${SPLYNX_API_URL}/api/2.0/admin/customers/${customerId}`,
+      `${SPLYNX_API_URL}/api/2.0/admin/customers/customer/${customerId}`,
       {
-        params: {
-          auth_type: 'auth_key',
-          key: SPLYNX_API_KEY,
-          signature: signature,
-          nonce: nonce
+        headers: {
+          'Authorization': getBasicAuthHeader()
         },
         timeout: 10000
       }
@@ -94,25 +82,26 @@ async function getAllSplynxCustomers() {
   try {
     logger.info('Fetching all customers from Splynx API');
 
-    // Generate nonce and signature for authentication
-    const nonce = Date.now().toString();
-    const signature = generateSignature(nonce);
-
     const response = await axios.get(
-      `${SPLYNX_API_URL}/api/2.0/admin/customers`,
+      `${SPLYNX_API_URL}/api/2.0/admin/customers/customer`,
       {
-        params: {
-          auth_type: 'auth_key',
-          key: SPLYNX_API_KEY,
-          signature: signature,
-          nonce: nonce,
-          limit: 1000 // Adjust as needed
+        headers: {
+          'Authorization': getBasicAuthHeader()
         },
         timeout: 30000
       }
     );
 
-    const customers = Array.isArray(response.data) ? response.data : [];
+    // Splynx API v2 can return data directly or wrapped in a 'data' property
+    let customers = [];
+    if (Array.isArray(response.data)) {
+      customers = response.data;
+    } else if (response.data && Array.isArray(response.data.data)) {
+      customers = response.data.data;
+    } else {
+      logger.warn('Unexpected Splynx API response format:', response.data);
+    }
+
     logger.info(`Successfully fetched ${customers.length} customers from Splynx`);
 
     return customers;
