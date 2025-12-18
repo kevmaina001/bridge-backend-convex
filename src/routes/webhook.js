@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const { dbHelpers } = require('../utils/database');
-const { postPaymentToUISP, syncSingleClient } = require('../services/uispService');
+const { postPaymentToUISP, syncSingleClient, findUISPClientByUserIdent } = require('../services/uispService');
 const { validateWebhookSignature } = require('../middleware/webhookValidator');
 const { sendPaymentToConvex, updatePaymentStatusInConvex } = require('../services/convexService');
+const { getSplynxCustomerLogin } = require('../services/splynxService');
 
 /**
  * POST /webhook/payment
@@ -71,23 +72,41 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
     // Look up UISP client ID
     let uispClientId = null;
     let lookupMethod = 'unknown';
+    let customerLogin = splynxCustomerId; // Default to the ID we received
 
-    // Method 1: For wireless clients (IDs starting with W), search by userIdent in UISP
-    if (splynxCustomerId.toUpperCase().startsWith('W')) {
-      logger.info(`Wireless customer detected: ${splynxCustomerId}. Searching UISP by userIdent...`);
+    // Method 1: Fetch customer login from Splynx API (most reliable)
+    try {
+      logger.info(`Fetching customer login from Splynx API for customer ${splynxCustomerId}...`);
+      customerLogin = await getSplynxCustomerLogin(splynxCustomerId);
+      logger.info(`Got customer login from Splynx: ${customerLogin}`);
+
+      // Search UISP by userIdent using the customer login
+      const uispClient = await findUISPClientByUserIdent(customerLogin);
+      if (uispClient) {
+        uispClientId = uispClient.id;
+        lookupMethod = 'splynx_api';
+        logger.info(`Found UISP client ${uispClientId} by userIdent ${customerLogin} (via Splynx API)`);
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch customer from Splynx API: ${error.message}. Trying fallback methods...`);
+    }
+
+    // Method 2: If customer ID starts with W, try direct userIdent search (fallback)
+    if (!uispClientId && splynxCustomerId.toUpperCase().startsWith('W')) {
+      logger.info(`Wireless customer detected: ${splynxCustomerId}. Trying direct userIdent search...`);
       try {
         const uispClient = await findUISPClientByUserIdent(splynxCustomerId);
         if (uispClient) {
           uispClientId = uispClient.id;
-          lookupMethod = 'userIdent';
-          logger.info(`Found UISP client ${uispClientId} by userIdent ${splynxCustomerId}`);
+          lookupMethod = 'direct_userIdent';
+          logger.info(`Found UISP client ${uispClientId} by direct userIdent ${splynxCustomerId}`);
         }
       } catch (error) {
         logger.warn(`Failed to search UISP by userIdent: ${error.message}`);
       }
     }
 
-    // Method 2: Fall back to mapping table (for non-wireless clients or if userIdent search failed)
+    // Method 3: Fall back to mapping table (last resort)
     if (!uispClientId) {
       logger.info(`Searching mapping table for customer ${splynxCustomerId}...`);
       uispClientId = await dbHelpers.getUispClientId(splynxCustomerId);
@@ -102,12 +121,13 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
       logger.error(`No UISP client found for Splynx customer ${splynxCustomerId}`);
       return res.status(400).json({
         error: 'Customer not found',
-        message: `Splynx customer ${splynxCustomerId} not found in UISP. Wireless customers (W...) should have matching userIdent in UISP.`,
-        splynxCustomerId: splynxCustomerId
+        message: `Splynx customer ${splynxCustomerId} (login: ${customerLogin}) not found in UISP. Please ensure the customer exists in UISP with matching userIdent.`,
+        splynxCustomerId: splynxCustomerId,
+        customerLogin: customerLogin
       });
     }
 
-    logger.info(`Using UISP client ${uispClientId} for payment (lookup method: ${lookupMethod})`);
+    logger.info(`Using UISP client ${uispClientId} for payment (lookup method: ${lookupMethod}, customer login: ${customerLogin})`);
 
     // Use the mapped UISP client ID
     paymentData.client_id = uispClientId;
