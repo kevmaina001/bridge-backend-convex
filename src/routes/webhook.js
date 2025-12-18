@@ -27,16 +27,26 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
     // Extract payment data from Splynx webhook
     // Adjust this based on actual Splynx webhook payload structure
     let paymentData;
+    let splynxCustomerId;
 
     if (req.body.data && req.body.data.attributes) {
-      // JSON API format
+      // JSON API format from Splynx
+      // customer_id is at data level, payment info is in attributes
       paymentData = req.body.data.attributes;
+      splynxCustomerId = req.body.data.customer_id; // Extract from data level, not attributes
+
+      logger.info('Splynx JSON API format detected', {
+        customer_id: splynxCustomerId,
+        attributes: Object.keys(paymentData)
+      });
     } else if (req.body.payment) {
       // Direct payment object
       paymentData = req.body.payment;
+      splynxCustomerId = paymentData.customer_id || paymentData.client_id;
     } else {
       // Assume body is the payment data
       paymentData = req.body;
+      splynxCustomerId = paymentData.customer_id || paymentData.client_id;
     }
 
     // Check if this is a test/ping request (empty payload or no data)
@@ -48,8 +58,10 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
       });
     }
 
-    // Map Splynx field names to our expected field names
-    const splynxCustomerId = paymentData.customer_id || paymentData.client_id;
+    // Ensure we have customer_id
+    if (!splynxCustomerId) {
+      splynxCustomerId = paymentData.customer_id || paymentData.client_id;
+    }
 
     if (!splynxCustomerId) {
       // Check if this is a test/validation request (no customer_id and minimal data)
