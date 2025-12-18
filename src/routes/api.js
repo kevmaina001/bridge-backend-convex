@@ -8,6 +8,11 @@ const {
   syncAllClients,
   syncSingleClient
 } = require('../services/uispService');
+const {
+  getAllSplynxCustomers,
+  transformSplynxCustomer
+} = require('../services/splynxService');
+const { syncSplynxCustomersToConvex } = require('../services/convexService');
 
 /**
  * GET /api/payments
@@ -355,6 +360,44 @@ router.get('/sync/logs', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch sync logs',
+      message: error.message
+    });
+  }
+});
+
+// ========== SPLYNX CUSTOMER ENDPOINTS ==========
+
+/**
+ * POST /api/splynx/customers/sync
+ * Trigger sync of Splynx customers
+ */
+router.post('/splynx/customers/sync', async (req, res) => {
+  try {
+    logger.info('Splynx customer sync requested');
+
+    // Fetch customers from Splynx
+    const splynxCustomers = await getAllSplynxCustomers();
+
+    // Transform customers
+    const transformedCustomers = splynxCustomers.map(transformSplynxCustomer);
+
+    // Sync to Convex
+    const syncResult = await syncSplynxCustomersToConvex(transformedCustomers);
+
+    res.json({
+      success: true,
+      message: 'Splynx customers synced successfully',
+      data: {
+        total: transformedCustomers.length,
+        syncResult
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error syncing Splynx customers:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to sync Splynx customers',
       message: error.message
     });
   }

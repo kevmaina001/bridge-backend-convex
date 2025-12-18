@@ -160,6 +160,57 @@ async function syncClientsToConvex(clients) {
 }
 
 /**
+ * Bulk sync Splynx customers to Convex
+ * @param {Array} customers - Array of Splynx customer objects
+ * @returns {Promise<Object>} Response from Convex
+ */
+async function syncSplynxCustomersToConvex(customers) {
+  if (!convexClient) {
+    logger.warn('Convex client not initialized. Skipping Convex sync.');
+    return { success: false, error: 'Convex not configured' };
+  }
+
+  try {
+    // Transform customers for Convex schema
+    // Note: Convex requires undefined for optional fields, not null
+    const transformedCustomers = customers.map(customer => {
+      const transformed = {
+        splynx_id: customer.splynx_id,
+      };
+
+      // Only add non-null optional fields
+      if (customer.login) transformed.login = customer.login;
+      if (customer.name) transformed.name = customer.name;
+      if (customer.email) transformed.email = customer.email;
+      if (customer.phone) transformed.phone = customer.phone;
+      if (customer.status) transformed.status = customer.status;
+      if (customer.billing_type) transformed.billing_type = customer.billing_type;
+      if (customer.category) transformed.category = customer.category;
+      if (customer.street_1) transformed.street_1 = customer.street_1;
+      if (customer.city) transformed.city = customer.city;
+      if (customer.zip_code) transformed.zip_code = customer.zip_code;
+
+      return transformed;
+    });
+
+    // Call the mutation using string path format
+    const result = await convexClient.mutation("splynx_customers:bulkUpsertSplynxCustomers", {
+      customers: transformedCustomers
+    });
+
+    logger.info(`${customers.length} Splynx customers synced to Convex successfully`);
+    return { success: true, result };
+  } catch (error) {
+    logger.error('Error syncing Splynx customers to Convex:', error.message);
+    logger.error('Error stack:', error.stack);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Log webhook event to Convex
  * @param {Object} logData - Webhook log data
  * @returns {Promise<Object>} Response from Convex
@@ -195,5 +246,6 @@ module.exports = {
   sendPaymentToConvex,
   updatePaymentStatusInConvex,
   syncClientsToConvex,
+  syncSplynxCustomersToConvex,
   logWebhookToConvex,
 };
