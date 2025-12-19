@@ -585,4 +585,139 @@ router.delete('/mappings/:splynxCustomerId', async (req, res) => {
   }
 });
 
+// ========== SMS ENDPOINTS ==========
+
+const { sendSingleSMS, sendBulkSMS, validateCredentials } = require('../services/smsService');
+
+/**
+ * POST /api/sms/send
+ * Send SMS to single or multiple recipients
+ * Body: { recipients: [phone numbers], message, senderId (optional) }
+ */
+router.post('/sms/send', async (req, res) => {
+  try {
+    const { recipients, message, senderId } = req.body;
+
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Recipients array is required'
+      });
+    }
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required'
+      });
+    }
+
+    logger.info(`SMS send requested for ${recipients.length} recipient(s)`);
+
+    const result = await sendBulkSMS(recipients, message, senderId);
+
+    res.json({
+      success: true,
+      message: 'SMS sent successfully',
+      data: result
+    });
+
+  } catch (error) {
+    logger.error('Error sending SMS:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send SMS',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/sms/send-to-clients
+ * Send SMS to clients by their IDs
+ * Body: { clientIds: [UISP client IDs], message, senderId (optional) }
+ */
+router.post('/sms/send-to-clients', async (req, res) => {
+  try {
+    const { clientIds, message, senderId } = req.body;
+
+    if (!clientIds || !Array.isArray(clientIds) || clientIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Client IDs array is required'
+      });
+    }
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required'
+      });
+    }
+
+    logger.info(`Fetching phone numbers for ${clientIds.length} client(s)`);
+
+    // Fetch phone numbers from database
+    const clients = await Promise.all(
+      clientIds.map(async (clientId) => {
+        return await dbHelpers.getClientById(clientId);
+      })
+    );
+
+    // Extract phone numbers
+    const phoneNumbers = clients
+      .filter(client => client && client.phone)
+      .map(client => client.phone);
+
+    if (phoneNumbers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid phone numbers found for selected clients'
+      });
+    }
+
+    logger.info(`Sending SMS to ${phoneNumbers.length} phone number(s)`);
+
+    const result = await sendBulkSMS(phoneNumbers, message, senderId);
+
+    res.json({
+      success: true,
+      message: `SMS sent to ${phoneNumbers.length} client(s)`,
+      data: result
+    });
+
+  } catch (error) {
+    logger.error('Error sending SMS to clients:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send SMS',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/sms/validate
+ * Validate Africa's Talking credentials
+ */
+router.get('/sms/validate', async (req, res) => {
+  try {
+    const isValid = await validateCredentials();
+
+    res.json({
+      success: true,
+      valid: isValid,
+      configured: !!(process.env.AFRICASTALKING_API_KEY && process.env.AFRICASTALKING_USERNAME)
+    });
+
+  } catch (error) {
+    logger.error('Error validating SMS credentials:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to validate credentials',
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;
