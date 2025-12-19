@@ -4,7 +4,7 @@ const logger = require('../utils/logger');
 const { dbHelpers } = require('../utils/database');
 const { postPaymentToUISP, syncSingleClient, findUISPClientByUserIdent } = require('../services/uispService');
 const { validateWebhookSignature } = require('../middleware/webhookValidator');
-const { sendPaymentToConvex, updatePaymentStatusInConvex, getSplynxCustomerLoginFromConvex } = require('../services/convexService');
+const { sendPaymentToConvex, updatePaymentStatusInConvex, getSplynxCustomerLoginFromConvex, getCustomerMappingFromConvex } = require('../services/convexService');
 const { getSplynxCustomerLogin } = require('../services/splynxService');
 
 /**
@@ -86,25 +86,41 @@ router.post('/payment', validateWebhookSignature, async (req, res) => {
     let lookupMethod = 'unknown';
     let customerLogin = splynxCustomerId; // Default to the ID we received
 
-    // Method 1: Try to get customer login from Convex (fastest, no external API call)
+    // Method 0: Check Convex customer_mappings first (fastest - proactive mappings)
     try {
-      logger.info(`Looking up customer login from Convex for customer ${splynxCustomerId}...`);
-      const loginFromConvex = await getSplynxCustomerLoginFromConvex(splynxCustomerId);
+      logger.info(`Checking Convex customer mappings for customer ${splynxCustomerId}...`);
+      const mapping = await getCustomerMappingFromConvex(splynxCustomerId);
 
-      if (loginFromConvex) {
-        customerLogin = loginFromConvex;
-        logger.info(`Got customer login from Convex: ${customerLogin}`);
-
-        // Search UISP by userIdent using the customer login
-        const uispClient = await findUISPClientByUserIdent(customerLogin);
-        if (uispClient) {
-          uispClientId = uispClient.id;
-          lookupMethod = 'convex_lookup';
-          logger.info(`Found UISP client ${uispClientId} by userIdent ${customerLogin} (via Convex)`);
-        }
+      if (mapping && mapping.uisp_client_id) {
+        uispClientId = mapping.uisp_client_id;
+        lookupMethod = 'proactive_mapping';
+        logger.info(`Found UISP client ${uispClientId} via proactive mapping (instant lookup)`);
       }
     } catch (error) {
-      logger.warn(`Failed to fetch customer from Convex: ${error.message}. Trying Splynx API...`);
+      logger.warn(`Failed to check Convex mappings: ${error.message}. Trying other methods...`);
+    }
+
+    // Method 1: Try to get customer login from Convex (fast, no external API call)
+    if (!uispClientId) {
+      try {
+        logger.info(`Looking up customer login from Convex for customer ${splynxCustomerId}...`);
+        const loginFromConvex = await getSplynxCustomerLoginFromConvex(splynxCustomerId);
+
+        if (loginFromConvex) {
+          customerLogin = loginFromConvex;
+          logger.info(`Got customer login from Convex: ${customerLogin}`);
+
+          // Search UISP by userIdent using the customer login
+          const uispClient = await findUISPClientByUserIdent(customerLogin);
+          if (uispClient) {
+            uispClientId = uispClient.id;
+            lookupMethod = 'convex_lookup';
+            logger.info(`Found UISP client ${uispClientId} by userIdent ${customerLogin} (via Convex)`);
+          }
+        }
+      } catch (error) {
+        logger.warn(`Failed to fetch customer from Convex: ${error.message}. Trying Splynx API...`);
+      }
     }
 
     // Method 2: If not found in Convex, try Splynx API

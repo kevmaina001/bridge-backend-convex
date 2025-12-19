@@ -12,7 +12,7 @@ const {
   getAllSplynxCustomers,
   transformSplynxCustomer
 } = require('../services/splynxService');
-const { syncSplynxCustomersToConvex } = require('../services/convexService');
+const { syncSplynxCustomersToConvex, createProactiveMappings } = require('../services/convexService');
 
 /**
  * GET /api/payments
@@ -266,7 +266,7 @@ router.get('/clients/:clientId/uisp-payments', async (req, res) => {
 
 /**
  * POST /api/clients/sync
- * Trigger full client sync from UISP
+ * Trigger full client sync from UISP and create proactive mappings
  */
 router.post('/clients/sync', async (req, res) => {
   try {
@@ -274,8 +274,13 @@ router.post('/clients/sync', async (req, res) => {
 
     // Start sync in background (don't wait for completion)
     syncAllClients()
-      .then(result => {
+      .then(async result => {
         logger.info('Background sync completed:', result);
+
+        // Create proactive mappings after client sync
+        logger.info('Creating proactive customer mappings after client sync...');
+        const mappingResult = await createProactiveMappings();
+        logger.info('Proactive mapping completed', mappingResult);
       })
       .catch(error => {
         logger.error('Background sync failed:', error);
@@ -299,7 +304,7 @@ router.post('/clients/sync', async (req, res) => {
 
 /**
  * POST /api/clients/sync/wait
- * Trigger full client sync and wait for completion
+ * Trigger full client sync and wait for completion, then create proactive mappings
  */
 router.post('/clients/sync/wait', async (req, res) => {
   try {
@@ -307,10 +312,23 @@ router.post('/clients/sync/wait', async (req, res) => {
 
     const result = await syncAllClients();
 
+    // Create proactive mappings after sync
+    logger.info('Creating proactive customer mappings...');
+    const mappingResult = await createProactiveMappings();
+    logger.info('Proactive mapping completed', mappingResult);
+
     res.json({
       success: true,
-      message: 'Client sync completed',
-      data: result
+      message: 'Client sync and mapping completed',
+      data: {
+        ...result,
+        mappings: mappingResult.success ? {
+          created: mappingResult.result?.created || 0,
+          updated: mappingResult.result?.updated || 0,
+          skipped: mappingResult.result?.skipped || 0,
+          total: mappingResult.result?.total || 0
+        } : { error: mappingResult.error }
+      }
     });
 
   } catch (error) {
@@ -376,7 +394,7 @@ router.get('/sync/logs', async (req, res) => {
 
 /**
  * POST /api/splynx/customers/sync
- * Trigger sync of Splynx customers
+ * Trigger sync of Splynx customers and create proactive mappings
  */
 router.post('/splynx/customers/sync', async (req, res) => {
   try {
@@ -397,12 +415,23 @@ router.post('/splynx/customers/sync', async (req, res) => {
     const syncResult = await syncSplynxCustomersToConvex(transformedCustomers);
     logger.info('Sync to Convex completed', syncResult);
 
+    // Create proactive mappings after sync
+    logger.info('Creating proactive customer mappings...');
+    const mappingResult = await createProactiveMappings();
+    logger.info('Proactive mapping completed', mappingResult);
+
     res.json({
       success: true,
-      message: 'Splynx customers synced successfully',
+      message: 'Splynx customers synced and mappings created successfully',
       data: {
         total: transformedCustomers.length,
-        syncResult
+        syncResult,
+        mappings: mappingResult.success ? {
+          created: mappingResult.result?.created || 0,
+          updated: mappingResult.result?.updated || 0,
+          skipped: mappingResult.result?.skipped || 0,
+          total: mappingResult.result?.total || 0
+        } : { error: mappingResult.error }
       }
     });
 

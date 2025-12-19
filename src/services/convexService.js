@@ -273,6 +273,70 @@ async function getSplynxCustomerLoginFromConvex(splynxCustomerId) {
   }
 }
 
+/**
+ * Create proactive customer mappings by matching Splynx customers with UISP clients
+ * This should be called after syncing both Splynx customers and UISP clients
+ * @returns {Promise<Object>} Mapping creation statistics
+ */
+async function createProactiveMappings() {
+  if (!convexClient) {
+    logger.warn('Convex client not initialized. Cannot create proactive mappings.');
+    return { success: false, error: 'Convex not configured' };
+  }
+
+  try {
+    logger.info('Creating proactive customer mappings...');
+
+    const result = await convexClient.mutation("customer_mappings:createProactiveMappings", {});
+
+    logger.info(`Proactive mappings created:`, {
+      created: result.created,
+      updated: result.updated,
+      skipped: result.skipped,
+      total: result.total
+    });
+
+    return { success: true, result };
+  } catch (error) {
+    logger.error('Error creating proactive mappings:', error.message);
+    logger.error('Error stack:', error.stack);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Get customer mapping from Convex by Splynx customer ID
+ * @param {string} splynxCustomerId - Splynx customer ID
+ * @returns {Promise<Object|null>} Mapping object or null if not found
+ */
+async function getCustomerMappingFromConvex(splynxCustomerId) {
+  if (!convexClient) {
+    logger.warn('Convex client not initialized. Cannot get customer mapping.');
+    return null;
+  }
+
+  try {
+    const mapping = await convexClient.query("customer_mappings:getCustomerMappings", {});
+
+    // Find the mapping for this customer
+    const found = mapping.find(m => m.splynx_customer_id === splynxCustomerId);
+
+    if (found) {
+      logger.info(`Found mapping in Convex: Splynx ${splynxCustomerId} → UISP ${found.uisp_client_id}`);
+      return found;
+    } else {
+      logger.info(`No mapping found in Convex for Splynx customer ${splynxCustomerId}`);
+      return null;
+    }
+  } catch (error) {
+    logger.error('Error getting customer mapping from Convex:', error.message);
+    return null;
+  }
+}
+
 module.exports = {
   sendPaymentToConvex,
   updatePaymentStatusInConvex,
@@ -280,4 +344,6 @@ module.exports = {
   syncSplynxCustomersToConvex,
   logWebhookToConvex,
   getSplynxCustomerLoginFromConvex,
+  createProactiveMappings,
+  getCustomerMappingFromConvex,
 };
